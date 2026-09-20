@@ -1,0 +1,1580 @@
+Bilkul. Main is poore **Queueable Apex** topic ko simple Hinglish mein, concept → syntax → examples → limits → chaining → testing ke flow mein explain karta hoon.
+
+# Queueable Apex — Deep Hinglish Explanation
+
+## 1. Sabse pehle: Queueable Apex hota kya hai?
+
+Maan lo Salesforce mein tumhare paas koi aisa kaam hai jo **time-consuming** hai:
+
+* Bahut saare records update karne hain
+* External API ko call karna hai
+* Heavy database processing karni hai
+* Aisa kaam hai jo user ke current transaction ko slow nahi karna chahiye
+
+Aise kaam ko hum **asynchronous** bana sakte hain.
+
+Simple words mein:
+
+> **User ka main kaam immediately complete ho jaye, aur heavy kaam background mein baad mein execute ho.**
+
+Queueable Apex isi ka ek mechanism hai.
+
+### Synchronous vs Asynchronous
+
+Normal Apex:
+
+```text
+User Request
+     ↓
+Apex Code
+     ↓
+Database Operation
+     ↓
+Response to User
+```
+
+Agar processing heavy hai:
+
+```text
+User Request
+     ↓
+Apex Code
+     ↓
+Queueable Job create
+     ↓
+Response to User
+     
+             ↓
+       Salesforce Queue
+             ↓
+       Queueable executes
+             ↓
+       Heavy Processing
+```
+
+Isliye Queueable ka main purpose hai:
+
+> **Heavy/long-running processing ko background mein execute karna.**
+
+---
+
+# 2. Queueable ko Future Method se compare karo
+
+Salesforce mein pehle asynchronous processing ke liye commonly **Future Methods** use hote the.
+
+Queueable ka use-case future methods jaisa hi hai, lekin Queueable mein additional capabilities milti hain.
+
+| Feature                  | Future  | Queueable |
+| ------------------------ | ------- | --------- |
+| Async execution          | ✅       | ✅         |
+| Job ID                   | ❌       | ✅         |
+| Non-primitive data types | ❌       | ✅         |
+| Job chaining             | ❌       | ✅         |
+| Callouts                 | ✅       | ✅         |
+| Monitoring               | Limited | Better    |
+| Complex async processing | Limited | Better    |
+
+Isliye Salesforce generally kehta hai:
+
+> **New asynchronous Apex development ke liye Queueable ko Future ke comparison mein prefer karo.**
+
+---
+
+# 3. Queueable Apex banane ke liye kya karna hota hai?
+
+Sabse important cheez:
+
+```apex
+implements Queueable
+```
+
+Example:
+
+```apex
+public with sharing class AsyncExecutionExample implements Queueable {
+
+    public void execute(QueueableContext context) {
+
+        Account a = new Account(
+            Name = 'Acme',
+            Phone = '(415) 555-1212'
+        );
+
+        insert as user a;
+    }
+}
+```
+
+Yahan class ne:
+
+```apex
+implements Queueable
+```
+
+kiya hai.
+
+Iska matlab Salesforce ko pata hai:
+
+> "Ye class Queueable job ki tarah background mein execute ho sakti hai."
+
+---
+
+# 4. `execute()` method kya hai?
+
+Queueable class mein main method hota hai:
+
+```apex
+public void execute(QueueableContext context)
+```
+
+Isi method ke andar tumhara actual asynchronous processing hota hai.
+
+For example:
+
+```apex
+public void execute(QueueableContext context) {
+
+    // Heavy processing here
+
+}
+```
+
+Tum ise roughly aise samajh sakte ho:
+
+```text
+Queueable Class
+      ↓
+   execute()
+      ↓
+Actual Background Work
+```
+
+---
+
+# 5. Queueable ko execute kaise karte hain?
+
+Sirf class bana dene se job execute nahi hogi.
+
+Tumhe usko queue mein submit karna padega:
+
+```apex
+ID jobID = System.enqueueJob(
+    new AsyncExecutionExample()
+);
+```
+
+Yahan:
+
+```apex
+System.enqueueJob()
+```
+
+bahut important hai.
+
+Ye Salesforce ko bolta hai:
+
+> "Is Queueable class ko asynchronous execution queue mein daal do."
+
+---
+
+# 6. `System.enqueueJob()` actually kya karta hai?
+
+Suppose:
+
+```apex
+System.enqueueJob(new AsyncExecutionExample());
+```
+
+Flow:
+
+```text
+new AsyncExecutionExample()
+          ↓
+System.enqueueJob()
+          ↓
+Salesforce Queue
+          ↓
+Resources available
+          ↓
+execute()
+          ↓
+Account Insert
+```
+
+Important point:
+
+**`enqueueJob()` ka matlab ye nahi hai ki job immediately execute ho jayegi.**
+
+Salesforce resources available hone par job execute karega.
+
+Isliye asynchronous ka nature hai:
+
+> "Abhi queue mein daalo, execution Salesforce jab resources available hon tab kare."
+
+---
+
+# 7. Job ID kya hota hai?
+
+Jab tum:
+
+```apex
+ID jobID = System.enqueueJob(
+    new AsyncExecutionExample()
+);
+```
+
+likhte ho, `enqueueJob()` ek **Job ID** return karta hai.
+
+Example:
+
+```text
+707XXXXXXXXXXXX
+```
+
+Ye ID Salesforce ke `AsyncApexJob` record se related hoti hai.
+
+Iska use tum job ko identify aur monitor karne ke liye kar sakte ho.
+
+---
+
+# 8. `AsyncApexJob` kya hai?
+
+Salesforce internally asynchronous jobs ko track karta hai.
+
+Tum query kar sakte ho:
+
+```apex
+AsyncApexJob jobInfo = [
+    SELECT Status, NumberOfErrors
+    FROM AsyncApexJob
+    WHERE Id = :jobID
+    WITH USER_MODE
+];
+```
+
+Ab tum dekh sakte ho:
+
+* Job ka status kya hai?
+* Kitni errors hui?
+* Job kis async process se related hai?
+
+Typical status values mein jaise:
+
+```text
+Holding
+Queued
+Preparing
+Processing
+Completed
+Aborted
+Failed
+```
+
+ho sakte hain.
+
+---
+
+# 9. Job ko Salesforce UI se bhi monitor kar sakte ho
+
+Salesforce Setup mein:
+
+```text
+Setup
+  ↓
+Quick Find
+  ↓
+Apex Jobs
+```
+
+Yahan tum asynchronous Apex jobs ko monitor kar sakte ho.
+
+So practical development mein:
+
+```text
+System.enqueueJob()
+       ↓
+Job ID
+       ↓
+AsyncApexJob
+       ↓
+Apex Jobs page
+```
+
+---
+
+# 10. Queueable mein non-primitive data types ka benefit
+
+Ye Queueable ka bahut important advantage hai.
+
+Future methods mein parameters generally primitive types ya collections of primitive types tak restricted hote hain.
+
+Queueable class mein tum member variables mein complex objects rakh sakte ho.
+
+For example:
+
+```apex
+public class AccountQueueable implements Queueable {
+
+    private Account accountRecord;
+
+    public AccountQueueable(Account acc) {
+        this.accountRecord = acc;
+    }
+
+    public void execute(QueueableContext context) {
+        insert accountRecord;
+    }
+}
+```
+
+Aur enqueue:
+
+```apex
+Account acc = new Account(
+    Name = 'Acme'
+);
+
+System.enqueueJob(
+    new AccountQueueable(acc)
+);
+```
+
+Conceptually:
+
+```text
+Account Object
+     ↓
+Queueable Constructor
+     ↓
+Queueable stores it
+     ↓
+Job Queue
+     ↓
+execute()
+     ↓
+Account available
+```
+
+Yahi Queueable ko Future methods se zyada flexible banata hai.
+
+---
+
+# 11. Queueable mein `transient` ka kya role hai?
+
+Agar koi variable:
+
+```apex
+transient
+```
+
+declare kiya gaya hai, to Queueable ke serialization/deserialization ke time uski value preserve nahi hoti.
+
+Example:
+
+```apex
+transient String data;
+```
+
+Queueable execute hone par ye value:
+
+```text
+null
+```
+
+ho sakti hai.
+
+Simple rule:
+
+> **Queueable ke across persist karna hai to variable ko `transient` mat banao.**
+
+---
+
+# 12. Queueable + Database Callout
+
+Queueable ka ek powerful use-case hai:
+
+> **External API call karna.**
+
+For example:
+
+```text
+Salesforce
+    ↓
+Queueable
+    ↓
+External REST API
+    ↓
+Response
+    ↓
+Salesforce processing
+```
+
+Iske liye Queueable class ko:
+
+```apex
+implements Queueable, Database.AllowsCallouts
+```
+
+karna hota hai.
+
+Example:
+
+```apex
+public class ApiQueueable
+    implements Queueable, Database.AllowsCallouts {
+
+    public void execute(QueueableContext context) {
+
+        HttpRequest request = new HttpRequest();
+
+        // Callout logic
+
+    }
+}
+```
+
+`Database.AllowsCallouts` ek **marker interface** hai.
+
+Iska purpose Salesforce ko indicate karna hai:
+
+> "Is Queueable job ko HTTP/web-service callout karne ki permission chahiye."
+
+---
+
+# 13. Queueable Chaining kya hai?
+
+Ye Queueable ka sabse powerful feature hai.
+
+Suppose tumhara process hai:
+
+```text
+Job 1
+  ↓
+Job 2
+  ↓
+Job 3
+  ↓
+Job 4
+```
+
+Matlab Job 2 tab execute ho jab Job 1 complete ho.
+
+Job 3 tab jab Job 2 complete ho.
+
+Isko kehte hain:
+
+> **Queueable Chaining**
+
+---
+
+# 14. Chaining kaise karte hain?
+
+First Queueable:
+
+```apex
+public class FirstJob implements Queueable {
+
+    public void execute(QueueableContext context) {
+
+        // First job processing
+
+        System.enqueueJob(
+            new SecondJob()
+        );
+    }
+}
+```
+
+Yahan important cheez hai:
+
+```apex
+System.enqueueJob(new SecondJob());
+```
+
+`execute()` ke andar call kiya gaya hai.
+
+Flow:
+
+```text
+FirstJob
+   ↓
+execute()
+   ↓
+Processing
+   ↓
+enqueue SecondJob
+   ↓
+SecondJob
+```
+
+---
+
+# 15. Chaining mein ek important restriction
+
+Ek executing Queueable job se tum **sirf ek child Queueable** enqueue kar sakte ho.
+
+Allowed:
+
+```text
+Parent
+  ↓
+Child
+```
+
+Allowed:
+
+```text
+Job1
+  ↓
+Job2
+  ↓
+Job3
+  ↓
+Job4
+```
+
+Not supported:
+
+```text
+        Job2
+       ↙   ↘
+    Job3    Job4
+```
+
+Yani ek parent se multiple child jobs directly create karna chaining ke context mein supported nahi hai.
+
+---
+
+# 16. Queueable chaining ko real-world example se samjho
+
+Suppose e-commerce system mein:
+
+### Job 1
+
+Orders process karo.
+
+### Job 2
+
+Processed orders ka invoice generate karo.
+
+### Job 3
+
+Invoice ko external system mein send karo.
+
+### Job 4
+
+Customer ko notification bhejo.
+
+Flow:
+
+```text
+Order Processing
+       ↓
+Invoice Generation
+       ↓
+External API
+       ↓
+Notification
+```
+
+Har stage independent Queueable ho sakti hai.
+
+Isse large process ko manageable pieces mein divide kar sakte ho.
+
+---
+
+# 17. Queueable Job Delay
+
+Kabhi-kabhi tum chahte ho ki Queueable immediately execute na ho.
+
+For example:
+
+```apex
+Integer delayInMinutes = 5;
+
+ID jobID = System.enqueueJob(
+    new MyQueueableClass(),
+    delayInMinutes
+);
+```
+
+Meaning:
+
+> Salesforce job ko **minimum 5 minutes ke delay** ke saath schedule kare.
+
+Allowed delay:
+
+```text
+0 to 10 minutes
+```
+
+Important:
+
+**Minimum delay ka matlab exactly 5 minutes par execution guaranteed nahi hai.**
+
+Matlab Salesforce 5 minutes se pehle execute nahi karega, but actual execution resource availability par depend karegi.
+
+---
+
+# 18. Delay ka practical use
+
+Suppose external API rate-limited hai.
+
+Tum rapidly ye kar rahe ho:
+
+```text
+Job 1 → API
+Job 2 → API
+Job 3 → API
+Job 4 → API
+Job 5 → API
+...
+```
+
+API overload ho sakti hai.
+
+Delay use karke:
+
+```text
+Job 1
+ ↓
+5 min
+ ↓
+Job 2
+ ↓
+5 min
+ ↓
+Job 3
+```
+
+jaisa controlled processing design kar sakte ho.
+
+---
+
+# 19. Chained jobs + delay
+
+Ye especially useful hai polling scenarios mein.
+
+Example:
+
+```text
+Salesforce → External API
+              ↓
+          "Processing"
+              
+wait
+
+Salesforce → External API
+              ↓
+          "Processing"
+              
+wait
+
+Salesforce → External API
+              ↓
+          "Completed"
+```
+
+Agar tum immediately repeatedly API ko call karoge, unnecessary async jobs consume ho sakte hain.
+
+Isliye delay useful hai.
+
+---
+
+# 20. Org-wide default Queueable delay
+
+Admins Salesforce mein default delay configure kar sakte hain.
+
+Setup:
+
+```text
+Setup
+ ↓
+Apex Settings
+ ↓
+Default minimum enqueue delay
+```
+
+Range:
+
+```text
+1–600 seconds
+```
+
+Ye un Queueable jobs ke liye default delay provide karta hai jinke `enqueueJob` call mein explicitly delay nahi diya gaya.
+
+Important:
+
+Agar tum explicitly:
+
+```apex
+System.enqueueJob(job, 5);
+```
+
+delay specify karte ho, to org-wide default delay ignore hota hai.
+
+---
+
+# 21. Stack Depth kya hota hai?
+
+Ab ek slightly advanced concept.
+
+Suppose:
+
+```text
+Job 1
+ ↓
+Job 2
+ ↓
+Job 3
+ ↓
+Job 4
+ ↓
+Job 5
+ ↓
+...
+```
+
+Ye chain kitni depth tak ja sakti hai?
+
+Salesforce mein Queueable chaining ke liye stack depth concept hota hai.
+
+Tum `AsyncOptions` ke through maximum stack depth specify kar sakte ho.
+
+Example:
+
+```apex
+AsyncOptions asyncOptions = new AsyncOptions();
+
+asyncOptions.MaximumQueueableStackDepth = 5;
+
+System.enqueueJob(
+    new FibonacciDepthQueueable(null, null),
+    asyncOptions
+);
+```
+
+Meaning:
+
+> Is chain ko maximum specified depth tak allow karo.
+
+---
+
+# 22. `AsyncInfo` kya karta hai?
+
+Running Queueable ko apni execution information chahiye ho to `AsyncInfo` useful hai.
+
+For example:
+
+```apex
+AsyncInfo.getCurrentQueueableStackDepth()
+```
+
+Ye batata hai:
+
+> Current Queueable chain ki depth kya hai?
+
+Suppose:
+
+```text
+Job 1 → depth 1
+Job 2 → depth 2
+Job 3 → depth 3
+```
+
+To Job 3 ke execution mein:
+
+```apex
+AsyncInfo.getCurrentQueueableStackDepth()
+```
+
+approximately:
+
+```text
+3
+```
+
+return karega.
+
+---
+
+# 23. Maximum stack depth check
+
+Example:
+
+```apex
+if (
+    System.AsyncInfo.hasMaxStackDepth() &&
+    AsyncInfo.getCurrentQueueableStackDepth() >=
+    AsyncInfo.getMaximumQueueableStackDepth()
+) {
+    // Stop chaining
+}
+else {
+    System.enqueueJob(
+        new FibonacciDepthQueueable(...)
+    );
+}
+```
+
+Simple meaning:
+
+```text
+Kya max depth configured hai?
+       ↓
+      YES
+       ↓
+Kya current depth max tak pahunch gayi?
+       ↓
+      YES
+       ↓
+Don't enqueue next job
+```
+
+Ye infinite/overly long chaining ko control karne ke liye useful hai.
+
+---
+
+# 24. Queueable Testing
+
+Asynchronous Apex ko test karne ka standard pattern:
+
+```apex
+Test.startTest();
+
+System.enqueueJob(
+    new AsyncExecutionExample()
+);
+
+Test.stopTest();
+```
+
+Ye bahut important hai.
+
+Normally Queueable background mein execute hoti hai.
+
+Lekin test context mein:
+
+```text
+Test.startTest()
+      ↓
+Queueable enqueue
+      ↓
+Test.stopTest()
+      ↓
+Async job executes
+      ↓
+Assertions
+```
+
+---
+
+# 25. `Test.startTest()` aur `Test.stopTest()` ka purpose
+
+Example:
+
+```apex
+Test.startTest();
+
+System.enqueueJob(new AsyncExecutionExample());
+
+Test.stopTest();
+```
+
+`Test.stopTest()` ke baad Salesforce test context mein asynchronous processing ko execute karta hai.
+
+Isliye tum result verify kar sakte ho.
+
+---
+
+# 26. Test example ko line-by-line samjho
+
+```apex
+@IsTest
+public with sharing class AsyncExecutionExampleTest {
+
+    @IsTest
+    static void test1() {
+
+        Test.startTest();
+
+        System.enqueueJob(
+            new AsyncExecutionExample()
+        );
+
+        Test.stopTest();
+
+        Account acct = [
+            SELECT Name, Phone
+            FROM Account
+            WHERE Name = 'Acme'
+            LIMIT 1
+            WITH USER_MODE
+        ];
+
+        Assert.isNotNull(acct);
+
+        Assert.areEqual(
+            '(415) 555-1212',
+            acct.Phone
+        );
+    }
+}
+```
+
+Flow:
+
+### Step 1
+
+```apex
+Test.startTest();
+```
+
+Test execution context start.
+
+### Step 2
+
+```apex
+System.enqueueJob(new AsyncExecutionExample());
+```
+
+Queueable submit.
+
+### Step 3
+
+```apex
+Test.stopTest();
+```
+
+Queueable execute hoti hai.
+
+### Step 4
+
+Queueable ne:
+
+```apex
+insert Account
+```
+
+kiya.
+
+### Step 5
+
+Test query karta hai:
+
+```apex
+SELECT Name, Phone
+FROM Account
+WHERE Name = 'Acme'
+```
+
+### Step 6
+
+Assertions:
+
+```apex
+Assert.isNotNull(acct);
+```
+
+Aur:
+
+```apex
+Assert.areEqual(
+    '(415) 555-1212',
+    acct.Phone
+);
+```
+
+verify karte hain ki expected result mila.
+
+---
+
+# 27. Queueable Limits — bahut important
+
+Ab interview/development perspective se limits samjho.
+
+## Single transaction mein Queueable jobs
+
+Normally ek transaction se maximum:
+
+```text
+50 Queueable jobs
+```
+
+enqueue kiye ja sakte hain.
+
+Example:
+
+```apex
+for (...) {
+    System.enqueueJob(...);
+}
+```
+
+Agar loop mein 100 jobs enqueue karne ki koshish karoge, problem ho sakti hai.
+
+---
+
+# 28. Asynchronous transaction mein limit
+
+Agar tum already asynchronous context mein ho, jaise:
+
+```text
+Batch Apex
+```
+
+to generally ek transaction mein sirf:
+
+```text
+1 Queueable job
+```
+
+enqueue kar sakte ho.
+
+Ye difference yaad rakho:
+
+```text
+Synchronous transaction
+→ up to 50 Queueables
+
+Asynchronous transaction
+→ 1 Queueable
+```
+
+---
+
+# 29. `Limits.getQueueableJobs()`
+
+Current transaction mein kitne Queueable jobs enqueue ho chuke hain, ye check karne ke liye:
+
+```apex
+Limits.getQueueableJobs()
+```
+
+use kar sakte ho.
+
+Ye especially useful hai jab dynamic code mein jobs enqueue kar rahe ho.
+
+---
+
+# 30. Queueable chaining ka special rule
+
+Ek Queueable execute ho raha hai:
+
+```text
+Parent Queueable
+```
+
+Uske andar:
+
+```apex
+System.enqueueJob(new ChildQueueable());
+```
+
+Allowed hai.
+
+But:
+
+```apex
+System.enqueueJob(new Child1());
+System.enqueueJob(new Child2());
+```
+
+same executing Queueable se multiple children create karna supported nahi hai.
+
+Think:
+
+```text
+       Parent
+          |
+        Child
+          |
+        Child
+          |
+        Child
+```
+
+not:
+
+```text
+       Parent
+       /    \
+   Child1   Child2
+```
+
+---
+
+# 31. Developer/Trial Edition mein stack-depth limitation
+
+Provided documentation ke according Developer aur Trial organizations mein chained Queueables ke liye default maximum stack depth:
+
+```text
+5
+```
+
+hai.
+
+Meaning chain roughly:
+
+```text
+Job 1
+ ↓
+Job 2
+ ↓
+Job 3
+ ↓
+Job 4
+ ↓
+Job 5
+```
+
+tak.
+
+Lekin newer org configurations/other editions mein stack-depth behavior ko `AsyncOptions` se control kiya ja sakta hai.
+
+Isliye production architecture mein exact org/edition limits verify karna important hai.
+
+---
+
+# 32. Queueable job ka execution daily async limit mein count hota hai
+
+Queueable ka execution asynchronous Apex ke shared limits ke against count hota hai.
+
+Simple idea:
+
+```text
+Queueable #1 → consumes async execution
+Queueable #2 → consumes async execution
+Queueable #3 → consumes async execution
+```
+
+Agar unnecessarily thousands of Queueables chain karoge, async execution limits consume ho sakti hain.
+
+Isi reason se Salesforce documentation delayed chaining aur safeguards recommend karti hai.
+
+---
+
+# 33. Duplicate Queueable Jobs
+
+Salesforce mein duplicate Queueable jobs ko detect karne ka mechanism bhi available hai.
+
+Idea:
+
+```text
+Same signature
+      ↓
+Queueable Job A
+      ↓
+Same signature Job B
+      ↓
+DuplicateMessageException
+```
+
+Iska purpose hai unnecessary duplicate async work ko prevent karna.
+
+Ye especially useful ho sakta hai jab multiple transactions same logical async work enqueue karne ki koshish kar rahe hon.
+
+---
+
+# 34. Transaction rollback ka important concept
+
+Ye point bahut important hai.
+
+Suppose:
+
+```apex
+System.enqueueJob(new MyQueueable());
+
+insert account;
+```
+
+Aur baad mein transaction rollback ho gaya.
+
+Then queued Queueable bhi process nahi hogi.
+
+Simple:
+
+```text
+Main Transaction
+       ↓
+enqueue Queueable
+       ↓
+Later error
+       ↓
+Transaction Rollback
+       ↓
+Queueable NOT processed
+```
+
+Why?
+
+Because Queueable enqueueing bhi current transaction ke outcome se associated hai.
+
+---
+
+# 35. Transaction Finalizer
+
+Queueable ka advanced feature hai:
+
+> **Transaction Finalizer**
+
+Ye asynchronous Queueable job ke saath final actions attach karne deta hai.
+
+Particularly useful:
+
+```text
+Queueable
+   ↓
+Processing
+   ↓
+Failure
+   ↓
+Finalizer
+   ↓
+Recovery / Logging / Cleanup
+```
+
+Example use cases:
+
+* Error logging
+* Retry logic
+* Status update
+* Cleanup
+* Failure handling
+
+Isko Queueable ke "failure recovery mechanism" ke roop mein soch sakte ho.
+
+---
+
+# 36. Queueable ka complete mental model
+
+Agar tumhe sirf ek diagram yaad rakhna ho, ye yaad rakho:
+
+```text
+                USER REQUEST
+                     │
+                     ▼
+              Normal Apex Code
+                     │
+                     ▼
+          System.enqueueJob(...)
+                     │
+                     ▼
+             ┌──────────────┐
+             │ Salesforce   │
+             │ Async Queue  │
+             └──────────────┘
+                     │
+            Resources available
+                     │
+                     ▼
+             Queueable.execute()
+                     │
+          ┌──────────┼──────────┐
+          ▼          ▼          ▼
+       Database   Callout    Processing
+          │          │          │
+          └──────────┼──────────┘
+                     │
+                     ▼
+                Job Complete
+                     │
+                     ▼
+             Optional Child Job
+                     │
+                     ▼
+              Next Queueable
+```
+
+---
+
+# 37. Ek real-world example
+
+Suppose Salesforce mein `Order__c` records hain.
+
+Requirement:
+
+> Order confirm hone ke baad external ERP system ko order bhejna hai.
+
+Direct trigger mein API callout karna problematic ho sakta hai.
+
+Instead:
+
+```text
+Order Trigger
+     ↓
+Queueable enqueue
+     ↓
+Queueable executes
+     ↓
+ERP API Callout
+     ↓
+ERP Response
+     ↓
+Order status update
+```
+
+Code structure:
+
+```apex
+public class OrderSyncQueueable
+    implements Queueable, Database.AllowsCallouts {
+
+    private Id orderId;
+
+    public OrderSyncQueueable(Id orderId) {
+        this.orderId = orderId;
+    }
+
+    public void execute(QueueableContext context) {
+
+        Order__c orderRecord = [
+            SELECT Id, Name
+            FROM Order__c
+            WHERE Id = :orderId
+            LIMIT 1
+        ];
+
+        // Make API callout
+
+        // Process response
+
+        // Update Order
+    }
+}
+```
+
+Trigger se:
+
+```apex
+System.enqueueJob(
+    new OrderSyncQueueable(orderId)
+);
+```
+
+Yahan Queueable ka real benefit clearly dikhta hai.
+
+---
+
+# 38. Queueable vs Future — interview ke liye
+
+Agar interviewer puche:
+
+> **Why Queueable over Future?**
+
+Answer ka core:
+
+### Queueable gives:
+
+**1. Job ID**
+
+```apex
+Id jobId = System.enqueueJob(...);
+```
+
+Job monitor kar sakte ho.
+
+**2. Complex data**
+
+sObjects/custom Apex types ko Queueable members mein handle kar sakte ho.
+
+**3. Chaining**
+
+```text
+Job1 → Job2 → Job3
+```
+
+possible hai.
+
+**4. Better structure**
+
+Complex asynchronous processing ko class-based design mein organize karna easy hota hai.
+
+---
+
+# 39. Queueable kab use karna chahiye?
+
+Generally Queueable consider karo jab:
+
+### Heavy processing hai
+
+```text
+Large database operation
+```
+
+### External API callout hai
+
+```text
+Salesforce → External System
+```
+
+### Process multiple stages mein hai
+
+```text
+Step 1 → Step 2 → Step 3
+```
+
+### Job monitor karna hai
+
+```text
+Job ID → AsyncApexJob
+```
+
+### Complex input data hai
+
+```text
+sObject/custom object
+```
+
+---
+
+# 40. Queueable kab unnecessarily use nahi karna chahiye?
+
+Agar simple synchronous operation hai:
+
+```apex
+Account a = new Account(Name='Test');
+insert a;
+```
+
+to sirf Queueable use karne ke liye Queueable banana unnecessary complexity create karega.
+
+Rule of thumb:
+
+> **Async ki actual need ho tab Queueable use karo.**
+
+---
+
+# 41. Queueable ka syntax cheat sheet
+
+### Basic Queueable
+
+```apex
+public class MyQueueable implements Queueable {
+
+    public void execute(QueueableContext context) {
+
+        // Logic
+
+    }
+}
+```
+
+### Enqueue
+
+```apex
+Id jobId = System.enqueueJob(
+    new MyQueueable()
+);
+```
+
+### With data
+
+```apex
+public class MyQueueable implements Queueable {
+
+    private Id recordId;
+
+    public MyQueueable(Id recordId) {
+        this.recordId = recordId;
+    }
+
+    public void execute(QueueableContext context) {
+        // Use recordId
+    }
+}
+```
+
+### Callout
+
+```apex
+public class MyQueueable
+    implements Queueable, Database.AllowsCallouts {
+
+    public void execute(QueueableContext context) {
+        // HTTP callout
+    }
+}
+```
+
+### Chaining
+
+```apex
+public void execute(QueueableContext context) {
+
+    // Current job
+
+    System.enqueueJob(
+        new NextQueueable()
+    );
+}
+```
+
+### Delay
+
+```apex
+System.enqueueJob(
+    new MyQueueable(),
+    5
+);
+```
+
+### Testing
+
+```apex
+Test.startTest();
+
+System.enqueueJob(
+    new MyQueueable()
+);
+
+Test.stopTest();
+
+// Assert results
+```
+
+---
+
+# 42. Sabse important points — exam/interview revision
+
+Agar tumhe pura topic quickly revise karna ho, ye **10 points** yaad rakho:
+
+1. **Queueable Apex asynchronous Apex hai.**
+2. Queueable banane ke liye `implements Queueable` use hota hai.
+3. Main method `execute(QueueableContext context)` hai.
+4. Job submit karne ke liye `System.enqueueJob()` use hota hai.
+5. `enqueueJob()` **Job ID** return karta hai.
+6. Job ko `AsyncApexJob` se monitor kar sakte ho.
+7. Queueable non-primitive/complex data types support karta hai.
+8. Queueable jobs ko **chain** kar sakte ho.
+9. Callouts ke liye `Database.AllowsCallouts` implement karna hota hai.
+10. Tests mein Queueable ko `Test.startTest()` aur `Test.stopTest()` ke beech enqueue karke result verify karte hain.
+
+---
+
+## One-line memory trick 🧠
+
+**Queueable = `Background Job + Job ID + Complex Data + Chaining + Callouts`**
+
+Aur iska basic flow:
+
+```text
+Create Class
+     ↓
+implements Queueable
+     ↓
+execute()
+     ↓
+System.enqueueJob()
+     ↓
+Salesforce Queue
+     ↓
+Background Execution
+     ↓
+AsyncApexJob Monitoring
+```
+
+**Future se Queueable yaad rakhne ka shortcut:**
+
+> **Future = basic async**
+> **Queueable = advanced async with control**
