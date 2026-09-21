@@ -1,0 +1,397 @@
+Bilkul. Main aapke diye hue **Future Methods** content ko Salesforce context mein, simple **Hinglish** mein explain kar raha hoon—technical terms ko Salesforce terminology ke saath hi rakhunga. Source mein jo points hain, unhi ko simplify kar raha hoon. 
+
+## Future Method — Simple Hinglish Explanation
+
+### 1. Future Method kya hota hai?
+
+Salesforce mein **Future Method ek Asynchronous Apex method** hota hai.
+
+Simple words mein:
+
+> Agar koi kaam immediately karna zaroori nahi hai aur hum chahte hain ki Salesforce us kaam ko **background mein baad mein execute kare**, toh hum Future Method use kar sakte hain.
+
+For example, maan lo:
+
+* User ne Salesforce mein **Account create** kiya.
+* Account create hone ke baad hume kisi **external web service/API** ko call karna hai.
+* API call mein time lag sakta hai.
+* Hum nahi chahte ki user ko API response ka wait karna pade.
+
+Toh hum API call ko Future Method mein daal sakte hain.
+
+**Main transaction:** Account create → immediately complete
+**Background:** Future Method → external API call
+
+Future Method system resources available hone par queue se execute hota hai. Isliye main Apex execution ko uske complete hone ka wait nahi karna padta. 
+
+---
+
+## 2. Future Method ka syntax
+
+Future Method banane ke liye method ke upar `@future` annotation lagate hain.
+
+```apex
+public with sharing class FutureClass {
+
+    @future
+    public static void myFutureMethod() {
+        
+        // Background mein hone wala kaam
+        
+    }
+}
+```
+
+Important points:
+
+* Method **static** hona chahiye.
+* Return type **void** hona chahiye.
+* Future method asynchronous hota hai. 
+
+---
+
+## 3. Future Method mein kya parameters pass kar sakte hain?
+
+Ye ek important interview point hai.
+
+Future Method mein hum:
+
+✅ Primitive data types pass kar sakte hain:
+
+```apex
+String
+Integer
+Boolean
+Id
+```
+
+Aur inke:
+
+* Arrays
+* Collections
+
+bhi pass kar sakte hain.
+
+Lekin:
+
+❌ Directly **sObject** pass nahi kar sakte.
+
+For example:
+
+```apex
+@future
+public static void processAccount(Account acc) {
+    
+}
+```
+
+Ye allowed nahi hai. 
+
+---
+
+## 4. Account/User ki jagah ID kyun pass karte hain?
+
+Ye samajhna bahut important hai.
+
+Suppose humare paas ek Account hai:
+
+```apex
+Account acc;
+```
+
+Humne Future Method call kiya.
+
+Lekin Future Method **immediately execute nahi hota**. Salesforce ise queue mein daal deta hai.
+
+Is beech Account record change ho sakta hai.
+
+Example:
+
+```text
+10:00 AM → Account Name = ABC
+          ↓
+Future Method call
+          ↓
+10:05 AM → Account Name = XYZ
+          ↓
+Future Method actually execute
+```
+
+Agar humne pura Account object pass kiya hota, toh Future Method ke paas purani information ho sakti hai.
+
+Isliye Salesforce recommend karta hai:
+
+**sObject pass mat karo → Id pass karo → Future Method ke andar latest record query karo.** 
+
+Example:
+
+```apex
+@future
+public static void processRecords(List<Id> recordIds) {
+
+    List<Account> accounts = [
+        SELECT Id, Name
+        FROM Account
+        WHERE Id IN :recordIds
+    ];
+
+    // Process accounts
+}
+```
+
+### Easy way to remember:
+
+**Future Method ko record nahi, record ki ID do.**
+
+---
+
+# 5. Future Method se Callout
+
+Future Method ka ek common use case hai:
+
+### External API Call
+
+Suppose Salesforce ko kisi external system se data exchange karna hai.
+
+Normally:
+
+```text
+Salesforce
+    ↓
+External API
+    ↓
+Response
+```
+
+Agar API slow hai toh Salesforce transaction wait kar sakta hai.
+
+Future Method mein:
+
+```text
+Salesforce Transaction
+        ↓
+Future Method Queue
+        ↓
+External API Call
+```
+
+Iske liye `callout=true` use karna hota hai.
+
+```apex
+@future(callout=true)
+public static void getStockQuotes(String acctName) {
+
+    // External API call
+
+}
+```
+
+`callout=true` Salesforce ko batata hai ki Future Method ke andar **external web service call** ki ja sakti hai. 
+
+---
+
+# 6. Future Method ka ek aur use — Mixed DML
+
+Salesforce mein kuch records **Setup Objects** hote hain, jaise:
+
+* User
+* UserRole
+
+Aur kuch normal/business records hote hain, jaise:
+
+* Account
+* Contact
+* Opportunity
+
+Kuch situations mein same transaction mein in types ke DML operations mix karne par **Mixed DML error** aa sakta hai.
+
+Example:
+
+```text
+Same Transaction
+
+Insert Account
+     +
+Insert User with Role
+
+       ↓
+
+Mixed DML Error
+```
+
+Future Method ki help se User-related DML ko **separate transaction** mein execute kar sakte hain.
+
+Source example mein pehle Account insert hota hai aur User insertion ko Future Method ke through separate thread/transaction mein execute kiya jata hai. 
+
+### Simple flow:
+
+```text
+Main Transaction
+      ↓
+Insert Account
+      ↓
+Call Future Method
+      ↓
+Future Transaction
+      ↓
+Insert User
+```
+
+---
+
+# 7. Kya Future Method ke andar another Future Method call kar sakte hain?
+
+**No.**
+
+Ek Future Method ke andar another Future Method ko call nahi kar sakte. 
+
+Example:
+
+```text
+Future Method A
+      ↓
+Future Method B
+
+❌ Not Allowed
+```
+
+---
+
+# 8. Salesforce ab kya recommend karta hai?
+
+Ye **important current point** hai.
+
+Salesforce documentation ke according, new implementations mein **Queueable Apex ko Future Methods ke alternative ke roop mein prefer/recommend kiya jata hai**.
+
+Queueable Future ke similar asynchronous use cases handle karta hai, but additional capabilities provide karta hai, jaise:
+
+* **Job ID**
+* **Non-primitive types**
+* **Job chaining**
+
+Isliye interview mein agar poocha jaye:
+
+> "Future Method vs Queueable — which one should we prefer for new development?"
+
+Toh source ke according answer hoga:
+
+**Queueable Apex ko prefer karna chahiye.** 
+
+---
+
+# 9. Future Method Testing
+
+Future Method asynchronous hota hai, isliye test class mein hume special approach use karni padti hai.
+
+Use:
+
+```apex
+Test.startTest();
+
+    // Future Method call
+
+Test.stopTest();
+```
+
+Example:
+
+```apex
+Test.startTest();
+
+    MixedDMLFuture.useFutureMethod();
+
+Test.stopTest();
+```
+
+`startTest()` ke baad ki asynchronous calls collect hoti hain, aur `stopTest()` par Salesforce un asynchronous processes ko synchronously execute karta hai. Isliye `stopTest()` ke baad hum results verify kar sakte hain. 
+
+### Easy flow:
+
+```text
+Test.startTest()
+       ↓
+Future Method call
+       ↓
+Test.stopTest()
+       ↓
+Future Method executes
+       ↓
+Assertions
+```
+
+---
+
+# 10. Future Method ke important limitations
+
+Interview ke liye ye points yaad rakhna useful hai:
+
+| Point                | Future Method                          |
+| -------------------- | -------------------------------------- |
+| Execution            | Asynchronous                           |
+| Annotation           | `@future`                              |
+| Method               | `static`                               |
+| Return type          | `void`                                 |
+| sObject parameter    | ❌ Not allowed                          |
+| Primitive parameters | ✅ Allowed                              |
+| External callout     | `@future(callout=true)`                |
+| Future → Future      | ❌ Not allowed                          |
+| Testing              | `Test.startTest()` / `Test.stopTest()` |
+| New development      | Queueable Apex is recommended instead  |
+
+Parameters aur testing behavior source mein specifically documented hain.  
+
+---
+
+## 11. Real Salesforce Example
+
+Suppose ek company Salesforce mein **Order** create karti hai.
+
+Order create hote hi hume external ERP system ko order details bhejni hain.
+
+Agar hum directly trigger se API call karein:
+
+```text
+Order Created
+     ↓
+Trigger
+     ↓
+API Call
+     ↓
+Response
+     ↓
+Transaction Complete
+```
+
+Isse main transaction external API par dependent ho sakti hai.
+
+Future Method approach:
+
+```text
+Order Created
+     ↓
+Trigger
+     ↓
+Future Method Called
+     ↓
+Main Transaction Complete
+     
+Meanwhile...
+
+Future Queue
+     ↓
+Future Method Executes
+     ↓
+ERP API Call
+```
+
+**But:** new development ke liye Salesforce documentation Queueable Apex ko prefer karne ko kehti hai, so practical modern design mein Queueable ko evaluate karna chahiye. 
+
+---
+
+## 12. Interview mein 30-second answer
+
+> **"Future Method Salesforce Apex ka asynchronous mechanism hai. Iska use hum aise operations ke liye karte hain jo background mein execute ho sakte hain, jaise external API call ya kuch DML operations ko separate transaction mein execute karna. Future Method `@future` annotation ke saath define hota hai, static aur void hona chahiye, aur isme sObjects directly pass nahi kar sakte—usually unki IDs pass karke latest records query karte hain. Callout ke liye `@future(callout=true)` use hota hai. Testing ke liye `Test.startTest()` aur `Test.stopTest()` use karte hain. Salesforce new development ke liye Queueable Apex ko Future Methods ke upar recommend karta hai."**  
+
+Agar aap Salesforce **interview preparation** kar rahe ho, toh is topic ko yaad rakhne ka easiest formula hai:
+
+**Future = Async + `@future` + static void + no sObject parameter + callout possible + separate execution + Queueable preferred.**
