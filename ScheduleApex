@@ -1,0 +1,643 @@
+Bilkul. Maine aapke content ko **easy-to-understand Hinglish** mein convert kiya hai, while keeping important Salesforce/Apex technical terms in English. Source content Apex Scheduler, `Schedulable`, `System.schedule`, Cron expressions, testing aur limits ko cover karta hai. 
+
+# Apex Scheduler — Easy Hinglish
+
+## 1. Apex Scheduler kya hai?
+
+**Apex Scheduler** ka use Apex class ko **future mein kisi specific time par run karne** ke liye hota hai.
+
+Example:
+
+* Roz raat 12 baje maintenance task run karna.
+* Har week koi cleanup process run karna.
+* Batch Apex ko fixed schedule par execute karna.
+
+Apex class ko schedule karne ke liye:
+
+1. Class mein `Schedulable` interface implement karo.
+2. Phir us class ko **Schedule Apex UI** ya `System.schedule()` method se schedule karo. 
+
+---
+
+# 2. Important: Scheduled job exactly usi time run hona guaranteed nahi hai
+
+Agar aapne job ko 10:00 AM ke liye schedule kiya hai, Salesforce us time par **execution ke liye schedule** karega.
+
+Lekin actual execution thoda late ho sakta hai, depending on **Salesforce service availability / system resources**. 
+
+Simple words:
+
+> **Scheduled time = expected time, exact execution guarantee nahi.**
+
+---
+
+# 3. Scheduled Apex ki limit
+
+Ek time par maximum:
+
+**100 scheduled Apex jobs**
+
+ho sakti hain.
+
+Current scheduled jobs ko aap:
+
+* Salesforce ke **Scheduled Jobs** page se check kar sakte ho.
+* Ya `CronTrigger` aur `CronJobDetail` objects ko query karke programmatically count kar sakte ho. 
+
+### Trigger se schedule karte waqt careful raho
+
+Agar aap trigger ke andar scheduled job create kar rahe ho, toh bahut careful rehna hai.
+
+Kyun?
+
+Ek trigger ek saath bahut saare records par execute ho sakta hai, jaise:
+
+* Bulk API update
+* Import wizard
+* Mass record update
+* Multiple records ek saath update
+
+Agar har record ke liye scheduled job create ho gaya, toh **100-job limit exceed** ho sakti hai. 
+
+---
+
+# 4. `Schedulable` Interface
+
+Apex class ko schedule karne ke liye Salesforce ka built-in:
+
+```apex
+Schedulable
+```
+
+interface implement karna hota hai. 
+
+Is interface mein ek important method hota hai:
+
+```apex
+public void execute(SchedulableContext sc) {
+}
+```
+
+Is `execute()` method ke andar woh logic call kiya jata hai jo scheduled time par execute karna hai. 
+
+---
+
+# 5. Simple Example
+
+Maan lo hamare paas ek class hai:
+
+```apex
+MergeNumbers
+```
+
+Aur humein ise schedule karna hai.
+
+Scheduled class:
+
+```apex
+public with sharing class ScheduledMerge implements Schedulable {
+
+    public void execute(SchedulableContext SC) {
+        MergeNumbers M = new MergeNumbers();
+    }
+}
+```
+
+### Isme kya ho raha hai?
+
+`ScheduledMerge`:
+
+* `Schedulable` implement kar rahi hai.
+* Isliye Salesforce is class ko schedule kar sakta hai.
+* Jab scheduled time aayega, `execute()` method call hoga.
+* `execute()` ke andar `MergeNumbers` class ka object create ho raha hai. 
+
+**Best practice:** Actual processing ko `execute()` ke andar directly likhne ke bajay separate class mein rakhna recommended hai. 
+
+---
+
+# 6. `System.schedule()` se job schedule karna
+
+Class banane ke baad:
+
+```apex
+ScheduledMerge m = new ScheduledMerge();
+
+String sch = '20 30 8 10 2 ?';
+
+String jobID = System.schedule('Merge Job', sch, m);
+```
+
+Yahan:
+
+* `m` → scheduled class ka object
+* `sch` → **Cron expression**
+* `'Merge Job'` → job ka naam
+* `System.schedule()` → actual scheduling karta hai
+* `jobID` → scheduled job ki ID return karta hai. 
+
+---
+
+# 7. Batch Apex ke saath Scheduler
+
+Apex Scheduler ko **Batch Apex** ke saath bhi use kar sakte ho.
+
+Example:
+
+```apex
+public with sharing class ScheduledBatchable implements Schedulable {
+
+    global void execute(SchedulableContext sc) {
+        Batchable b = new Batchable();
+        Database.executeBatch(b);
+    }
+}
+```
+
+Yahan scheduled time par:
+
+```apex
+Database.executeBatch(b);
+```
+
+call hoga aur Batch Apex execute karega. 
+
+### Easier option
+
+Agar sirf ek batch job ko future mein ek baar schedule karna hai, toh:
+
+```apex
+System.scheduleBatch()
+```
+
+use kar sakte ho.
+
+Iske liye `Schedulable` interface implement karna zaroori nahi hai. 
+
+---
+
+# 8. `SchedulableContext`
+
+`SchedulableContext` scheduled job ke baare mein information track karne mein help karta hai.
+
+Iska:
+
+```apex
+getTriggerID()
+```
+
+method scheduled job ke associated **CronTrigger ID** ko return karta hai. 
+
+Job ko stop/abort karne ke liye:
+
+```apex
+System.abortJob(jobId);
+```
+
+use kar sakte ho.
+
+---
+
+# 9. Scheduled Job ko Track kaise karein?
+
+Scheduled jobs ki information `CronTrigger` object mein milti hai.
+
+Example:
+
+```apex
+CronTrigger ct =
+    [SELECT TimesTriggered, NextFireTime
+     FROM CronTrigger
+     WHERE Id = :jobID
+     WITH USER_MODE];
+```
+
+Yahan:
+
+### `TimesTriggered`
+
+Job kitni baar execute ho chuki hai.
+
+### `NextFireTime`
+
+Job next time kab execute hogi. 
+
+---
+
+# 10. Job ka Name aur Type
+
+`CronTrigger` ke through associated `CronJobDetail` se job ka:
+
+* Name
+* Job Type
+
+nikal sakte ho.
+
+Example:
+
+```apex
+CronTrigger job =
+    [SELECT Id,
+            CronJobDetail.Id,
+            CronJobDetail.Name,
+            CronJobDetail.JobType
+     FROM CronTrigger
+     WITH USER_MODE
+     ORDER BY CreatedDate DESC
+     LIMIT 1];
+```
+
+
+
+---
+
+# 11. Total Scheduled Apex Jobs Count
+
+Scheduled Apex jobs count karne ke liye:
+
+```apex
+SELECT COUNT()
+FROM CronTrigger
+WHERE CronJobDetail.JobType = '7'
+WITH USER_MODE
+```
+
+Yahan `JobType = '7'` ka matlab **Scheduled Apex** hai. 
+
+---
+
+# 12. Apex Scheduler ko Test kaise karein?
+
+`System.schedule()` ek **asynchronous process** start karta hai.
+
+Testing ke waqt humein ensure karna hota hai ki scheduled job execute ho chuki ho before we verify results.
+
+Isliye use karo:
+
+```apex
+Test.startTest();
+```
+
+aur
+
+```apex
+Test.stopTest();
+```
+
+Pattern:
+
+```apex
+Test.startTest();
+
+System.schedule(...);
+
+Test.stopTest();
+```
+
+`startTest()` ke baad asynchronous calls collect hoti hain.
+
+`stopTest()` execute hone par ye asynchronous processes test ke andar synchronously run kar diye jaate hain. 
+
+### Easy way to remember:
+
+> **Scheduled Apex test karna hai → `Test.startTest()` + `System.schedule()` + `Test.stopTest()`**
+
+---
+
+# 13. `System.schedule()` ke 3 arguments
+
+`System.schedule()` ko 3 main cheezein chahiye:
+
+```apex
+System.schedule(
+    jobName,
+    cronExpression,
+    classObject
+);
+```
+
+### 1. Job Name
+
+Job ka unique naam.
+
+### 2. Cron Expression
+
+Job **kab run hoga** ye define karta hai.
+
+### 3. Class
+
+Kaunsi `Schedulable` class run karni hai. 
+
+---
+
+# 14. Job Name Unique hona chahiye
+
+Agar same naam ka job already scheduled hai aur aap same naam se doosra job schedule karne ki try karoge, error milega:
+
+```text
+System.AsyncException:
+The Apex job named "jobName" is already scheduled for execution.
+```
+
+Isliye scheduled job ka name unique hona chahiye. 
+
+---
+
+# 15. Cron Expression
+
+Cron expression batata hai ki job **kab execute hogi**.
+
+Salesforce Apex Scheduler mein format hai:
+
+```text
+Seconds Minutes Hours Day_of_month Month Day_of_week Optional_year
+```
+
+Example:
+
+```text
+0 0 13 * * ?
+```
+
+Matlab:
+
+**Har din 1 PM par run karo.** 
+
+---
+
+# 16. Cron Expression ko simple way mein samjho
+
+Format:
+
+| Position | Meaning       |
+| -------- | ------------- |
+| 1        | Seconds       |
+| 2        | Minutes       |
+| 3        | Hours         |
+| 4        | Day of Month  |
+| 5        | Month         |
+| 6        | Day of Week   |
+| 7        | Optional Year |
+
+Example:
+
+```text
+0 0 10 ? * MON-FRI
+```
+
+Matlab:
+
+**Monday se Friday, har din 10 AM par job run hogi.** 
+
+---
+
+# 17. Cron Special Characters
+
+### `,` → Multiple values
+
+```text
+JAN, MAR, APR
+```
+
+Matlab January, March aur April.
+
+### `-` → Range
+
+```text
+JAN-MAR
+```
+
+Matlab January se March.
+
+### `*` → All values
+
+```text
+*
+```
+
+Matlab available sabhi values.
+
+### `?` → No specific value
+
+Ye mainly:
+
+* Day of Month
+* Day of Week
+
+ke liye use hota hai.
+
+### `/` → Increment
+
+Example:
+
+```text
+1/5
+```
+
+Matlab specified starting point se har 5th interval.
+
+### `L` → Last
+
+Last day ya last occurrence ko represent karta hai.
+
+### `W` → Nearest weekday
+
+Monday-Friday ke nearest weekday ko represent karta hai.
+
+### `#` → Nth occurrence
+
+Example:
+
+```text
+2#1
+```
+
+Matlab **month ka first Monday**. 
+
+---
+
+# 18. Important Cron Examples
+
+### Every day at 1 PM
+
+```text
+0 0 13 * * ?
+```
+
+### Every hour, 5 minutes past the hour
+
+```text
+0 5 * * * ?
+```
+
+### Every month ke last Friday ko 10 PM
+
+```text
+0 0 22 ? * 6L
+```
+
+### Monday-Friday at 10 AM
+
+```text
+0 0 10 ? * MON-FRI
+```
+
+### 2010 mein har din 8 PM
+
+```text
+0 0 20 * * ? 2010
+```
+
+
+
+---
+
+# 19. `System.scheduleBatch()`
+
+Agar aapko **Batch Apex ko future mein ek specific time par sirf ek baar run** karna hai, toh:
+
+```apex
+System.scheduleBatch()
+```
+
+use kar sakte ho.
+
+Is method ke liye `Schedulable` interface implement karna required nahi hai. 
+
+---
+
+# 20. Apex Scheduler ki Important Limits
+
+### Limit 1: Scheduled Jobs
+
+Ek time par maximum:
+
+**100 Scheduled Apex jobs**
+
+
+
+### Limit 2: 24-hour executions
+
+Scheduled Apex executions ka maximum:
+
+**250,000 per 24 hours**
+
+ya
+
+**Number of user licenses × 200**
+
+**jo bhi greater ho**, woh limit apply hoti hai.
+
+Ye limit poore org ke asynchronous Apex ke saath shared hai, including:
+
+* Batch Apex
+* Queueable Apex
+* Scheduled Apex
+* Future methods 
+
+---
+
+# 21. Important Best Practices
+
+### 1. Exact execution time guaranteed nahi
+
+Salesforce resources/service availability ke according execution delay ho sakta hai.
+
+### 2. Trigger se scheduling carefully karo
+
+Bulk operations ki wajah se 100-job limit easily hit ho sakti hai.
+
+### 3. Processing separate class mein rakho
+
+`execute()` method ko unnecessarily large mat banao.
+
+Better architecture:
+
+```text
+Scheduler Class
+      ↓
+Business Logic Class
+      ↓
+Actual Processing
+```
+
+### 4. Synchronous callouts allowed nahi
+
+Scheduled Apex se synchronous Web Service callouts supported nahi hain.
+
+Asynchronous callout ke liye **Queueable Apex + `Database.AllowsCallouts`** use kiya ja sakta hai. 
+
+---
+
+# 22. Salesforce Maintenance Downtime
+
+Agar scheduled job ke execution time par Salesforce maintenance downtime chal raha hai, toh job baad mein resources available hone par run hogi.
+
+Agar job already running thi aur downtime aa gaya, toh job rollback hokar baad mein dobara schedule ho sakti hai. 
+
+---
+
+# 23. Sandbox Refresh
+
+Jab sandbox refresh hota hai, source org ke scheduled jobs automatically copy nahi hote.
+
+Isliye refresh ke baad required jobs ko **dobara schedule** karna padta hai. 
+
+---
+
+# 24. Scheduled Job ka State Persist ho sakta hai
+
+`System.schedule()` ke time object ka state jo initialize hua hai, woh subsequent scheduled executions mein persist ho sakta hai.
+
+Agar member variables/properties ko persist nahi karna hai, toh `transient` keyword use kar sakte ho. 
+
+---
+
+# 25. Deployment ke waqt dikkat
+
+Agar koi class currently scheduled hai aur aap us class ya uske dependent code mein changes deploy karne ki koshish karte ho, toh deployment error aa sakta hai.
+
+Recommended approach:
+
+1. Scheduled job delete karo.
+2. Updated code deploy karo.
+3. Job ko updated class ke saath dobara schedule karo. 
+
+---
+
+# 26. Ek line mein poora Apex Scheduler
+
+**Apex Scheduler = Apex class ko future ke kisi specific time par automatically execute karne ka mechanism.**
+
+Basic flow:
+
+```text
+Create Apex Class
+       ↓
+Implement Schedulable
+       ↓
+Implement execute()
+       ↓
+Create Cron Expression
+       ↓
+System.schedule()
+       ↓
+Salesforce creates Scheduled Job
+       ↓
+Specified time par execute()
+```
+
+### Exam/Interview ke liye yaad rakho
+
+* `Schedulable` → class ko schedule-able banata hai.
+* `execute(SchedulableContext sc)` → scheduled time par run hota hai.
+* `System.schedule()` → job schedule karta hai.
+* `CronTrigger` → scheduled job ki information track karta hai.
+* `getTriggerId()` → current scheduled job ki ID deta hai.
+* `System.abortJob()` → scheduled job stop karta hai.
+* `System.scheduleBatch()` → batch ko schedule karne ka simpler option.
+* `Test.startTest()` + `Test.stopTest()` → scheduled Apex testing mein important.
+* Maximum **100 scheduled Apex jobs** at one time.
+* Cron format: **Seconds → Minutes → Hours → Day → Month → Weekday → Year**. 
+
+Agar aap Salesforce/Apex **interview preparation** kar rahe ho, toh is content se main next step mein **Apex Scheduler ke important interview questions + answers Hinglish mein** bhi bana sakta hoon.
